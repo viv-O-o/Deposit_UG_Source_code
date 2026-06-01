@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Evo_Ug_Sim/Evo_Ug_Sim.vcxproj" Id="19e476a6-6542-482d-964d-e5835a8ba248" />
+</Solution>
