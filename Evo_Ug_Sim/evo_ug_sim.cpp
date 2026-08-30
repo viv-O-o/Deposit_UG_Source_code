@@ -3,14 +3,17 @@
 #include <map>
 #include <fstream>
 #include <sstream>
+#include <mutex>
 #include "EvoUG.h"
 #include <nlohmann/json.hpp>
 using nlohmann::json;
 namespace fs = std::filesystem;
 using namespace std;
 
-EvoUG::EvoUG(int L_, int T_, double c_, double rho_, double K_, double gamma_, double alpha_, double copy_error_, int seed_, string outdir, string runid, bool snapshots)
-    : L(L_), T(T_), c(c_), rho(rho_), K(K_), gamma(gamma_), alpha(alpha_), copy_error(copy_error_), save_dir(outdir), run_id(runid), save_snapshots(snapshots)
+static std::mutex g_summary_mutex;
+
+EvoUG::EvoUG(int L_, int T_, double c_, double rho_, double K_, double gamma_, double alpha_, double copy_error_, int seed_, string outdir, string runid, bool snapshots, bool verbose_)
+    : L(L_), T(T_), c(c_), rho(rho_), K(K_), gamma(gamma_), alpha(alpha_), copy_error(copy_error_), save_dir(outdir), run_id(runid), save_snapshots(snapshots), verbose(verbose_)
 { 
     N = L * L;
     rng.seed(seed_);
@@ -57,12 +60,15 @@ EvoUG::EvoUG(int L_, int T_, double c_, double rho_, double K_, double gamma_, d
         fs::create_directories(save_dir);
     }
 
-    string summary_file = save_dir + "/summary_" + param_tag + ".csv";
-    if (!fs::exists(summary_file)) {
-        ofstream summary_f(summary_file);
-        if (summary_f.is_open()) {
-            summary_f << "repeat_id,gen,mean_p,mean_q,mean_w,mean_payoff,sample_success_rate\n";
-            summary_f.close();
+    {
+        lock_guard<mutex> lock(g_summary_mutex);
+        string summary_file = save_dir + "/summary_" + param_tag + ".csv";
+        if (!fs::exists(summary_file)) {
+            ofstream summary_f(summary_file);
+            if (summary_f.is_open()) {
+                summary_f << "repeat_id,gen,mean_p,mean_q,mean_w,mean_payoff,sample_success_rate,mean_proposer_payoff,mean_responder_payoff,mean_R\n";
+                summary_f.close();
+            }
         }
     }
 }
@@ -86,7 +92,9 @@ double EvoUG::phi_prob_i(double wi, double wj) {
     double exp_j = exp(alpha * wj);
     return exp_i / (exp_i + exp_j);
 }
-void EvoUG::save_summary(int t, double mp, double mq, double mw, double mpayoff, double msr) {
+void EvoUG::save_summary(int t, double mp, double mq, double mw, double mpayoff, double msr,
+                         double mean_proposer_payoff, double mean_responder_payoff, double mean_R) {
+    lock_guard<mutex> lock(g_summary_mutex);
     string summary_file = save_dir + "/summary_" + param_tag + ".csv";
     ofstream summary_f(summary_file, ios::app);
     if (summary_f.is_open()) {
@@ -96,7 +104,10 @@ void EvoUG::save_summary(int t, double mp, double mq, double mw, double mpayoff,
             << mq << ","
             << mw << ","
             << mpayoff << ","
-            << msr << "\n";
+            << msr << ","
+            << mean_proposer_payoff << ","
+            << mean_responder_payoff << ","
+            << mean_R << "\n";
         summary_f.close();
     }
 }
@@ -250,11 +261,23 @@ void EvoUG::run(int record_interval) {
             }
         }
 
-        // 计算收益差并更新w
+        // 计算收益差并更新w（同时累计 mean_R，不改变更新公式）
+        double sum_R = 0.0;
         for (int i = 0; i < N; i++) {
             double R = avg_prop[i] - avg_resp[i];
+            sum_R += R;
             w[i] = clamp(w[i] + gamma * R, 0.0, 1.0);
         }
+
+        double total_prop_payoff = 0.0;
+        double total_resp_payoff = 0.0;
+        for (int i = 0; i < N; i++) {
+            total_prop_payoff += prop_payoffs[i];
+            total_resp_payoff += resp_payoffs[i];
+        }
+        double mean_proposer_payoff = total_prop_payoff / static_cast<double>(M);
+        double mean_responder_payoff = total_resp_payoff / static_cast<double>(M);
+        double mean_R = sum_R / static_cast<double>(N);
 
         double mp = mean(p);
         double mq = mean(q);
@@ -270,7 +293,8 @@ void EvoUG::run(int record_interval) {
             last_msr = msr;
 
             // 保存到汇总文件
-            save_summary(t, mp, mq, mw, mpayoff, msr);
+            save_summary(t, mp, mq, mw, mpayoff, msr,
+                         mean_proposer_payoff, mean_responder_payoff, mean_R);
         }
 
 
@@ -280,10 +304,13 @@ void EvoUG::run(int record_interval) {
             {"mean_q", mq},
             {"mean_w", mw},
             {"mean_payoff", mpayoff},
-            {"sample_success_rate", msr}
+            {"sample_success_rate", msr},
+            {"mean_proposer_payoff", mean_proposer_payoff},
+            {"mean_responder_payoff", mean_responder_payoff},
+            {"mean_R", mean_R}
         });
 
-        if (t % record_interval == 0) {
+        if (verbose && t % record_interval == 0) {
             cout << "[Gen " << t << "] mean_p=" << mp
                 << " mean_q=" << mq
                 << " mean_w=" << mw
@@ -299,9 +326,11 @@ void EvoUG::run(int record_interval) {
         }
     }
 
-    cout << "Repeat " << run_id << " finished. Last generation: mean_p=" << last_mp
-        << ", mean_q=" << last_mq << ", mean_w=" << last_mw
-        << ", success_rate=" << last_msr << endl;
+    if (verbose) {
+        cout << "Repeat " << run_id << " finished. Last generation: mean_p=" << last_mp
+            << ", mean_q=" << last_mq << ", mean_w=" << last_mw
+            << ", success_rate=" << last_msr << endl;
+    }
 
     string tag = "c=" + to_string(c) +
         "_gamma=" + to_string(gamma) +
@@ -330,7 +359,7 @@ void EvoUG::run(int record_interval) {
         "_" + run_id + "_timeseries.csv";
 
     ofstream ts_file(ts_name);
-    ts_file << "gen,mean_p,mean_q,mean_w,mean_payoff,sample_success_rate\n";
+    ts_file << "gen,mean_p,mean_q,mean_w,mean_payoff,sample_success_rate,mean_proposer_payoff,mean_responder_payoff,mean_R\n";
 
     for (auto& rec : records) {
         ts_file << rec["gen"] << ","
@@ -338,7 +367,10 @@ void EvoUG::run(int record_interval) {
             << rec["mean_q"] << ","
             << rec["mean_w"] << ","
             << rec["mean_payoff"] << ","
-            << rec["sample_success_rate"] << "\n";
+            << rec["sample_success_rate"] << ","
+            << rec["mean_proposer_payoff"] << ","
+            << rec["mean_responder_payoff"] << ","
+            << rec["mean_R"] << "\n";
     }
 
     ts_file.close();

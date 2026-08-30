@@ -20,15 +20,17 @@ public:
     std::mt19937_64 rng;
     std::string save_dir, run_id;
     bool save_snapshots;
+    bool verbose;
     std::string param_tag;
     double last_mp, last_mq, last_mw, last_mpayoff, last_msr;
 
-    EvoUG(int L_, int T_, double c_, double rho_, double K_, double gamma_, double alpha_, double copy_error_, int seed_, std::string outdir, std::string runid, bool snapshots);
+    EvoUG(int L_, int T_, double c_, double rho_, double K_, double gamma_, double alpha_, double copy_error_, int seed_, std::string outdir, std::string runid, bool snapshots, bool verbose_ = true);
 
     void reset_state();
     //double phi_prob_i(double wi, double wj);
     void run(int record_interval = 1);
-    void save_summary(int t, double mp, double mq, double mw, double mpayoff, double msr);
+    void save_summary(int t, double mp, double mq, double mw, double mpayoff, double msr,
+                      double mean_proposer_payoff, double mean_responder_payoff, double mean_R);
 
 private:
     double U01();
