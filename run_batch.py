@@ -24,7 +24,11 @@ EXE_PATH = Path(r"D:\VisualStudio\work_place\Evo_Ug_Sim\Evo_Ug_Sim\x64\Release\E
 WORK_DIR = Path(r"D:\VisualStudio\work_place\Evo_Ug_Sim\Evo_Ug_Sim")
 
 PARAMS_CSV = WORK_DIR / "params.csv"
-NUM_CORES = 12
+NUM_CORES = 9
+
+# "baseline" (default): original model, writes to results_cpp/
+# "previous_role_payoff": robustness model, writes to results_previous_role_payoff/
+WILLINGNESS_MODE = "previous_role_payoff"
 
 
 def run_simulation(args):
@@ -33,7 +37,7 @@ def run_simulation(args):
     """
     L, T, c, rho, gamma, alpha, repeats = args
 
-    # Same order as main.cpp cin prompts
+    # Same order as main.cpp cin prompts (mode is a CLI arg, not stdin)
     stdin_text = (
         f"{int(L)}\n"
         f"{int(T)}\n"
@@ -44,9 +48,11 @@ def run_simulation(args):
         f"{int(repeats)}\n"
     )
 
+    cmd = [str(EXE_PATH), WILLINGNESS_MODE]
+
     try:
         subprocess.run(
-            [str(EXE_PATH)],
+            cmd,
             input=stdin_text,
             text=True,
             check=True,
@@ -94,7 +100,12 @@ if __name__ == "__main__":
     num_cores = min(NUM_CORES, max(1, len(tasks)))
     print(f"Starting {len(tasks)} tasks on {num_cores} cores...")
     print(f"Exe: {EXE_PATH}")
-    print(f"Work dir (results_cpp): {WORK_DIR}")
+    print(f"Willingness mode: {WILLINGNESS_MODE}")
+    print(f"Work dir: {WORK_DIR}")
+    if WILLINGNESS_MODE.lower() == "previous_role_payoff":
+        print("Output root: results_previous_role_payoff/")
+    else:
+        print("Output root: results_cpp/  (same as original baseline; will overwrite if re-run)")
 
     # Windows: guard is required for multiprocessing spawn
     with multiprocessing.Pool(processes=num_cores) as pool:

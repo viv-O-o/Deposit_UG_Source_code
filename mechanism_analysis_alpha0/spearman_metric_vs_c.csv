@@ -1,0 +1,10 @@
+metric,spearman_vs_c,spearman_p
+mean_p,-0.9778393350570412,
+mean_q,-0.9292662199549022,
+mean_w,-0.9887108035315358,
+mean_payoff,-0.9938289506051904,
+sample_success_rate,-0.780752328779244,
+mean_proposer_payoff,-0.9938233268979838,
+mean_responder_payoff,-0.9799512096266995,
+mean_R,-0.9934092338451096,
+role_payoff_gap,-0.9933678245398221,

@@ -6,6 +6,7 @@
 results_cpp/
 mechanism_analysis/
 .idea/
+results_previous_role_payoff/
 # User-specific files
 *.rsuser
 *.suo

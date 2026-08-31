@@ -1,29 +1,62 @@
 #include <iostream>
 #include <string>
+#include <cstdlib>
 #include <random>
 #include <filesystem>
 #include "EvoUG.h"
 using namespace std;
 namespace fs = std::filesystem;
 
-int main() {
+static WillingnessUpdateMode parse_willingness_mode(int argc, char* argv[]) {
+    if (argc < 2) {
+        return WillingnessUpdateMode::BASELINE;
+    }
+    string a = argv[1];
+    if (a == "baseline" || a == "BASELINE") {
+        return WillingnessUpdateMode::BASELINE;
+    }
+    if (a == "previous_role_payoff" || a == "PREVIOUS_ROLE_PAYOFF") {
+        return WillingnessUpdateMode::PREVIOUS_ROLE_PAYOFF;
+    }
+    cerr << "Unknown willingness mode: " << a << "\n";
+    cerr << "Usage: Evo_Ug_Sim.exe [baseline | previous_role_payoff]\n";
+    exit(1);
+}
+
+static const char* mode_name(WillingnessUpdateMode mode) {
+    return (mode == WillingnessUpdateMode::PREVIOUS_ROLE_PAYOFF)
+        ? "PREVIOUS_ROLE_PAYOFF"
+        : "BASELINE";
+}
+
+static string mode_output_root(WillingnessUpdateMode mode) {
+    if (mode == WillingnessUpdateMode::PREVIOUS_ROLE_PAYOFF) {
+        return "results_previous_role_payoff";
+    }
+    return "results_cpp";
+}
+
+int main(int argc, char* argv[]) {
+    WillingnessUpdateMode mode = parse_willingness_mode(argc, argv);
+
     int L, T, repeats;
     double c, rho, gamma, alpha;
 
-    cout << "输入参数开始实验：\n";
-    cout << "L（格子大小）="; cin >> L;
-    cout << "T（迭代代数）="; cin >> T;
-    cout << "c（成本参数）="; cin >> c;
-    cout << "rho（返还比例）="; cin >> rho;
-    cout << "gamma（学习率）="; cin >> gamma;
-    cout << "alpha（选择强度）="; cin >> alpha;
-    cout << "实验重复次数 repeats="; cin >> repeats;
+    cout << "Input parameters:\n";
+    cout << "willingness mode = " << mode_name(mode) << "\n";
+    cout << "L = "; cin >> L;
+    cout << "T = "; cin >> T;
+    cout << "c = "; cin >> c;
+    cout << "rho = "; cin >> rho;
+    cout << "gamma = "; cin >> gamma;
+    cout << "alpha = "; cin >> alpha;
+    cout << "repeats = "; cin >> repeats;
 
-    // 创建基础结果目录
-    string base_dir = "results_cpp";
+    // BASELINE -> results_cpp/ (original path; existing baseline data is not used by robustness)
+    // PREVIOUS_ROLE_PAYOFF -> results_previous_role_payoff/ (separate directory)
+    string base_dir = mode_output_root(mode);
     fs::create_directories(base_dir);
 
-    // 创建参数文件夹名称
     string param_folder_name = "L" + to_string(L) +
         "_T" + to_string(T) +
         "_c" + to_string(c).substr(0, 4) +
@@ -31,21 +64,18 @@ int main() {
         "_gamma" + to_string(gamma).substr(0, 4) +
         "_alpha" + to_string(alpha).substr(0, 4);
 
-    // 完整的输出目录
     string outdir = base_dir + "/" + param_folder_name;
-    fs::create_directories(outdir);  // 确保参数文件夹存在
+    fs::create_directories(outdir);
 
-    cout << "输出目录: " << outdir << endl;
+    cout << "Output directory: " << outdir << endl;
 
     for (int r = 0; r < repeats; r++) {
         int seed = random_device{}();
         string runid = "repeat_" + to_string(r);
-        // 参数说明: L, T, c, rho, K, gamma, alpha, copy_error, seed, outdir, runid, snapshots
-        EvoUG sim(L, T, c, rho, 0.1, gamma, alpha, 0.005, seed, outdir, runid, true);
+        EvoUG sim(L, T, c, rho, 0.1, gamma, alpha, 0.005, seed, outdir, runid, true, mode);
         sim.run();
     }
 
-    cout << "实验完成，结果已保存到 " << outdir << " 目录\n";
+    cout << "Finished. Results saved to " << outdir << "\n";
     return 0;
-
 }

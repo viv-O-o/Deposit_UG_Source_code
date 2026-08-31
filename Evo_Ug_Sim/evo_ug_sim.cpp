@@ -12,8 +12,8 @@ using namespace std;
 
 static std::mutex g_summary_mutex;
 
-EvoUG::EvoUG(int L_, int T_, double c_, double rho_, double K_, double gamma_, double alpha_, double copy_error_, int seed_, string outdir, string runid, bool snapshots, bool verbose_)
-    : L(L_), T(T_), c(c_), rho(rho_), K(K_), gamma(gamma_), alpha(alpha_), copy_error(copy_error_), save_dir(outdir), run_id(runid), save_snapshots(snapshots), verbose(verbose_)
+EvoUG::EvoUG(int L_, int T_, double c_, double rho_, double K_, double gamma_, double alpha_, double copy_error_, int seed_, string outdir, string runid, bool snapshots, WillingnessUpdateMode w_mode_, bool verbose_)
+    : L(L_), T(T_), c(c_), rho(rho_), K(K_), gamma(gamma_), alpha(alpha_), copy_error(copy_error_), w_mode(w_mode_), save_dir(outdir), run_id(runid), save_snapshots(snapshots), verbose(verbose_)
 { 
     N = L * L;
     rng.seed(seed_);
@@ -31,6 +31,8 @@ EvoUG::EvoUG(int L_, int T_, double c_, double rho_, double K_, double gamma_, d
     resp_counts.resize(N);
     prop_payoffs.resize(N);
     resp_payoffs.resize(N);
+    prev_avg_prop.resize(N, 0.0);
+    prev_avg_resp.resize(N, 0.0);
 
     uniform_real_distribution<double> U(0, 1);
     for (int i = 0; i < N; i++) {
@@ -55,7 +57,7 @@ EvoUG::EvoUG(int L_, int T_, double c_, double rho_, double K_, double gamma_, d
         }
     }
 
-    // 确保保存目录存在
+    // ?????????????
     if (!fs::exists(save_dir)) {
         fs::create_directories(save_dir);
     }
@@ -85,6 +87,8 @@ void EvoUG::reset_state() {
     fill(resp_counts.begin(), resp_counts.end(), 0);
     fill(prop_payoffs.begin(), prop_payoffs.end(), 0.0);
     fill(resp_payoffs.begin(), resp_payoffs.end(), 0.0);
+    fill(prev_avg_prop.begin(), prev_avg_prop.end(), 0.0);
+    fill(prev_avg_resp.begin(), prev_avg_resp.end(), 0.0);
 }
 
 double EvoUG::phi_prob_i(double wi, double wj) {
@@ -155,6 +159,9 @@ void EvoUG::save_vector(string name, int t, const vector<double>& v) {
 void EvoUG::run(int record_interval) {
     vector<map<string, double>> records;
     size_t M = edges.size();
+    // t=0 has no previous-period role averages
+    fill(prev_avg_prop.begin(), prev_avg_prop.end(), 0.0);
+    fill(prev_avg_resp.begin(), prev_avg_resp.end(), 0.0);
     for (int t = 0; t < T; t++) {
         fill(payoffs.begin(), payoffs.end(), 0.0);
         fill(prop_counts.begin(), prop_counts.end(), 0);
@@ -163,11 +170,11 @@ void EvoUG::run(int record_interval) {
         fill(resp_payoffs.begin(), resp_payoffs.end(), 0.0);
         int success = 0;
 
-        // -------- 博弈阶段 --------
+        // -------- ?????? --------
         for (auto& e : edges) {
             int i = e.first;
             int j = e.second;
-            // 角色分配方式
+            // ????????
             double prob_i = phi_prob_i(w[i], w[j]);
             int proposer, responder;
             if (U01() < prob_i) {
@@ -183,7 +190,7 @@ void EvoUG::run(int record_interval) {
             double thresh = q[responder];
 
             if (offer >= thresh) {
-                // 提议成功
+                // ??????
                 double payoff_prop = 1.0 - offer - c + rho * c;
                 double payoff_resp = offer;
                 success++;
@@ -191,82 +198,91 @@ void EvoUG::run(int record_interval) {
                 payoffs[proposer] += payoff_prop;
                 payoffs[responder] += payoff_resp;
 
-                // 记录提议者收益和次数
+                // ?????????????????
                 prop_payoffs[proposer] += payoff_prop;
                 prop_counts[proposer] += 1;
 
-                // 记录回应者收益和次数
+                // ????????????????
                 resp_payoffs[responder] += payoff_resp;
                 resp_counts[responder] += 1;
             }
             else {
-                // 提议失败
+                // ???????
                 double payoff_prop = -c;
                 double payoff_resp = 0.0;
 
                 payoffs[proposer] += payoff_prop;
                 payoffs[responder] += payoff_resp;
 
-                // 记录提议者收益和次数
+                // ?????????????????
                 prop_payoffs[proposer] += payoff_prop;
                 prop_counts[proposer] += 1;
 
-                // 记录回应者收益和次数
+                // ????????????????
                 resp_payoffs[responder] += payoff_resp;
                 resp_counts[responder] += 1;
             }
         }
 
-        // -------- 策略更新 (异步更新) --------
-        int updates_per_gen = N;  // 或者根据需求设置，默认N次更新
+        // -------- ??????? (??????) --------
+        int updates_per_gen = N;  // ???????????????????N??????
 
         for (int update_count = 0; update_count < updates_per_gen; update_count++) {
-            // 1. 随机选择一个个体i
+            // 1. ?????????????i
             int i = rand_int(0, N - 1);
 
-            // 2. 从i的邻居中随机选择一个邻居j
+            // 2. ??i???????????????????j
             int num_neighbors = neighs[i].size();
             int random_neighbor_idx = rand_int(0, num_neighbors - 1);
             int j = neighs[i][random_neighbor_idx];
 
-            // 3. 使用Fermi规则决定是否模仿邻居j
+            // 3. ???Fermi????????????????j
             double fi = payoffs[i];
             double fj = payoffs[j];
             double fermi = 1.0 / (1.0 + exp((fi - fj) / K));
 
-            // 4. 根据概率决定是否模仿
+            // 4. ????????????????
             if (U01() < fermi) {
-                // 模仿邻居j
+                // ??????j
                 p[i] = clamp(p[j] + noise(), 0.0, 1.0);
                 q[i] = clamp(q[j] + noise(), 0.0, 1.0);
             }
             else {
-                // 不模仿，仅添加噪声
+                // ????????????????
                 p[i] = clamp(p[i] + noise(), 0.0, 1.0);
                 q[i] = clamp(q[i] + noise(), 0.0, 1.0);
             }
         }
       
 
-        // -------- 意愿更新 --------
+        // -------- ??????? --------
         vector<double> avg_prop(N, 0.0);
         vector<double> avg_resp(N, 0.0);
 
         for (int i = 0; i < N; i++) {
             if (prop_counts[i] > 0) {
                 avg_prop[i] = prop_payoffs[i] / prop_counts[i];
+            } else if (w_mode == WillingnessUpdateMode::PREVIOUS_ROLE_PAYOFF) {
+                avg_prop[i] = prev_avg_prop[i];
             }
+
             if (resp_counts[i] > 0) {
                 avg_resp[i] = resp_payoffs[i] / resp_counts[i];
+            } else if (w_mode == WillingnessUpdateMode::PREVIOUS_ROLE_PAYOFF) {
+                avg_resp[i] = prev_avg_resp[i];
             }
         }
 
-        // 计算收益差并更新w（同时累计 mean_R，不改变更新公式）
         double sum_R = 0.0;
         for (int i = 0; i < N; i++) {
             double R = avg_prop[i] - avg_resp[i];
             sum_R += R;
             w[i] = clamp(w[i] + gamma * R, 0.0, 1.0);
+        }
+
+        if (w_mode == WillingnessUpdateMode::PREVIOUS_ROLE_PAYOFF) {
+            prev_avg_prop = avg_prop;
+            prev_avg_resp = avg_resp;
         }
 
         double total_prop_payoff = 0.0;
@@ -292,7 +308,7 @@ void EvoUG::run(int record_interval) {
             last_mpayoff = mpayoff;
             last_msr = msr;
 
-            // 保存到汇总文件
+            // ????????????
             save_summary(t, mp, mq, mw, mpayoff, msr,
                          mean_proposer_payoff, mean_responder_payoff, mean_R);
         }
@@ -347,6 +363,8 @@ void EvoUG::run(int record_interval) {
     j["alpha"] = alpha;
     j["copy_error"] = copy_error;
     j["repeat"] = run_id;
+    j["willingness_update_mode"] = (w_mode == WillingnessUpdateMode::PREVIOUS_ROLE_PAYOFF)
+        ? "PREVIOUS_ROLE_PAYOFF" : "BASELINE";
 
     ofstream param_file(save_dir + "/params_" + tag + ".json");
     param_file << j.dump(2);

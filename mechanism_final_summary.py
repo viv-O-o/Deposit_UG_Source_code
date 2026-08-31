@@ -20,7 +20,7 @@ OUT_DIR = ROOT / "mechanism_analysis"
 
 # --- target experiment ---
 TARGET_RHO = 0.0
-TARGET_ALPHA = 6.0
+TARGET_ALPHA = 0.0
 TARGET_GAMMA = 0.1
 TARGET_CS = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40]
 C_TOL = 1e-6
@@ -233,11 +233,11 @@ def main() -> None:
 
     final_df = collect_final_rows()
     # Optional audit table (repeat-level finals); does not modify originals
-    audit_path = OUT_DIR / "mechanism_final_by_repeat.csv"
+    audit_path = OUT_DIR / "mechanism_final_by_repeat_alpha0.csv"
     final_df.to_csv(audit_path, index=False)
 
     summary = summarize_by_c(final_df)
-    out_path = OUT_DIR / "mechanism_final_summary.csv"
+    out_path = OUT_DIR / "mechanism_final_summary_alpha0.csv"
     summary.to_csv(out_path, index=False)
 
     print(f"\nWrote: {out_path}")
