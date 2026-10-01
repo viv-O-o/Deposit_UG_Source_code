@@ -7,6 +7,4 @@ This code is used to study the evolution of fairness behavior in the ultimatum g
 * C++
 * Visual Studio
 
-## Usage
 
-Compile and run the program in Visual Studio. Simulation parameters can be specified in the parameter file.
